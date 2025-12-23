@@ -8,6 +8,9 @@
     <script src="https://unpkg.com/feather-icons"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    // V.4 
+    
     <style>
         @keyframes pulse-ring {
             0% { transform: scale(0.33); opacity: 1; }
@@ -193,6 +196,7 @@
                 <div class="w-full max-w-[200px] bg-slate-100 h-1.5 rounded-full overflow-hidden mx-auto mt-4">
                     <div id="handshakeProgressBar" class="bg-blue-600 h-full w-0 transition-all duration-300"></div>
                 </div>
+                <button onclick="resetSetup()" class="mt-8 text-blue-600 font-bold text-sm">Cancel & Retry</button>
             </div>
         </div>
 
@@ -261,7 +265,7 @@
         let localCode = Math.floor(100000 + Math.random() * 900000).toString();
         let handshakeProgressValue = 0;
         let signalChannel;
-        const iceServers = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+        const iceServers = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }, { urls: 'stun:stun2.l.google.com:19302' }] };
         const APP_URL = window.location.origin;
 
         function navigateToApp() {
@@ -303,6 +307,7 @@
                 if (payload.to && payload.to !== localCode) return;
 
                 if (payload.type === 'offer') {
+                    if (peerConnection.signalingState !== "stable") return;
                     await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.offer));
                     const answer = await peerConnection.createAnswer();
                     await peerConnection.setLocalDescription(answer);
@@ -312,21 +317,32 @@
                         payload: { type: 'answer', answer: answer, from: localCode, to: payload.from }
                     });
                 } else if (payload.type === 'answer') {
-                    await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.answer));
+                    if (peerConnection.signalingState === "have-local-offer") {
+                        await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.answer));
+                    }
                 } else if (payload.type === 'ice-candidate') {
                     try {
-                        await peerConnection.addIceCandidate(new RTCIceCandidate(payload.candidate));
+                        if (payload.candidate) {
+                            await peerConnection.addIceCandidate(new RTCIceCandidate(payload.candidate));
+                        }
                     } catch (e) {}
                 }
             })
             .subscribe((status) => {
                 if (status === 'SUBSCRIBED') {
-                    console.log("Ready for signals on code:", code);
+                    console.log("Active on:", code);
                 }
             });
         }
 
         function setupWebRTC() {
+            if (peerConnection) {
+                peerConnection.onicecandidate = null;
+                peerConnection.ondatachannel = null;
+                peerConnection.oniceconnectionstatechange = null;
+                peerConnection.close();
+            }
+            
             peerConnection = new RTCPeerConnection(iceServers);
             
             peerConnection.onicecandidate = (event) => {
@@ -354,33 +370,47 @@
                 const state = peerConnection.iceConnectionState;
                 updateUIStatus(state);
                 if (state === 'connected' || state === 'completed') completeHandshakeUI();
+                if (state === 'failed') {
+                    resetSetup();
+                }
             };
         }
 
         async function connectToPeer() {
             const code = document.getElementById('peerIdInput').value.trim();
-            if (code.length !== 6) {
-                showToast("Enter a valid code");
-                return;
-            }
+            if (code.length !== 6) return;
             
             showHandshakeUI();
+            setupWebRTC();
             
-            dataChannel = peerConnection.createDataChannel("fileTransfer");
+            dataChannel = peerConnection.createDataChannel("fileTransfer", { ordered: true });
             setupDataChannel(dataChannel);
 
             const offer = await peerConnection.createOffer();
             await peerConnection.setLocalDescription(offer);
             
-            signalChannel.send({
-                type: 'broadcast',
-                event: 'signal',
-                payload: { type: 'offer', offer: offer, from: localCode, to: code }
-            });
+            const sendSignal = () => {
+                if (peerConnection.iceConnectionState === 'connected' || peerConnection.iceConnectionState === 'completed') {
+                    clearInterval(window.signalRetry);
+                    return;
+                }
+                signalChannel.send({
+                    type: 'broadcast',
+                    event: 'signal',
+                    payload: { type: 'offer', offer: offer, from: localCode, to: code }
+                });
+            };
+
+            sendSignal();
+            if (window.signalRetry) clearInterval(window.signalRetry);
+            window.signalRetry = setInterval(sendSignal, 2000);
         }
 
         function setupDataChannel(channel) {
-            channel.onopen = () => completeHandshakeUI();
+            channel.onopen = () => {
+                if (window.signalRetry) clearInterval(window.signalRetry);
+                completeHandshakeUI();
+            };
             channel.onmessage = handleIncomingData;
             channel.onclose = () => updateUIStatus('disconnected');
         }
@@ -392,14 +422,14 @@
             const bar = document.getElementById('handshakeProgressBar');
             const text = document.getElementById('handshakePercent');
             
-            const interval = setInterval(() => {
+            if (window.handshakeInterval) clearInterval(window.handshakeInterval);
+            window.handshakeInterval = setInterval(() => {
                 if (handshakeProgressValue < 98) {
-                    handshakeProgressValue += 2;
+                    handshakeProgressValue += 1;
                     text.innerText = `${handshakeProgressValue}%`;
                     bar.style.width = `${handshakeProgressValue}%`;
                 }
             }, 100);
-            window.handshakeInterval = interval;
         }
 
         function completeHandshakeUI() {
@@ -412,6 +442,15 @@
             }, 500);
         }
 
+        function resetSetup() {
+            if (window.handshakeInterval) clearInterval(window.handshakeInterval);
+            if (window.signalRetry) clearInterval(window.signalRetry);
+            document.getElementById('setupScreen').classList.remove('hidden');
+            document.getElementById('setupContent').classList.remove('hidden');
+            document.getElementById('handshakeContent').classList.add('hidden');
+            setupWebRTC();
+        }
+
         function handleIncomingData(event) {
             try {
                 const data = JSON.parse(event.data);
@@ -420,7 +459,12 @@
                 } else if (data.type === 'file-chunk') {
                     window.incomingFile.chunks.push(data.chunk);
                     if (window.incomingFile.chunks.length === data.totalChunks) {
-                        const blob = new Blob(window.incomingFile.chunks.map(c => Uint8Array.from(atob(c), c => c.charCodeAt(0))));
+                        const blob = new Blob(window.incomingFile.chunks.map(c => {
+                            const bin = atob(c);
+                            const arr = new Uint8Array(bin.length);
+                            for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+                            return arr;
+                        }));
                         const url = URL.createObjectURL(blob);
                         const a = document.createElement('a');
                         a.href = url;
@@ -444,9 +488,12 @@
                 dataChannel.send(JSON.stringify({ type: 'file-start', name: file.name }));
                 for (let i = 0; i < totalChunks; i++) {
                     const chunk = buffer.slice(i * chunkSize, (i + 1) * chunkSize);
+                    const bytes = new Uint8Array(chunk);
+                    let binary = '';
+                    for (let j = 0; j < bytes.byteLength; j++) binary += String.fromCharCode(bytes[j]);
                     dataChannel.send(JSON.stringify({
                         type: 'file-chunk',
-                        chunk: btoa(String.fromCharCode(...new Uint8Array(chunk))),
+                        chunk: btoa(binary),
                         totalChunks: totalChunks
                     }));
                     let p = ((i + 1) / totalChunks) * 100;
