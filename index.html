@@ -8,9 +8,6 @@
     <script src="https://unpkg.com/feather-icons"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
-    // V.4 
-    
     <style>
         @keyframes pulse-ring {
             0% { transform: scale(0.33); opacity: 1; }
@@ -255,6 +252,7 @@
     </div>
 
     <script>
+        console.log("[SwiftDrop] System Initializing...");
         const SUPABASE_URL = "https://txvnfnjmgqypsivcwfos.supabase.co";
         const SUPABASE_KEY = "sb_publishable_E7bYIhykblJCsyzbalF1-g_-07QbZSj";
         const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -269,10 +267,12 @@
         const APP_URL = window.location.origin;
 
         function navigateToApp() {
+            console.log("[UI] Navigating to App View");
             document.getElementById('landing-view').style.display = 'none';
             document.getElementById('app-view').style.display = 'block';
             if (!qrCode) {
                 const connectUrl = `${APP_URL}?connectcode=${localCode}`;
+                console.log("[System] Local Identity:", localCode);
                 generateQRCode(connectUrl);
                 document.getElementById('myCodeDisplay').value = localCode;
                 setupSignalChannel(localCode);
@@ -280,11 +280,13 @@
         }
 
         function navigateToLanding() {
+            console.log("[UI] Navigating to Landing View");
             document.getElementById('app-view').style.display = 'none';
             document.getElementById('landing-view').style.display = 'block';
         }
 
         function generateQRCode(text) {
+            console.log("[UI] Generating QR Code for:", text);
             const container = document.getElementById('qrcode');
             container.innerHTML = "";
             qrCode = new QRCode(container, {
@@ -298,48 +300,53 @@
         }
 
         function setupSignalChannel(code) {
+            console.log("[Signal] Subscribing to channel: signal-" + code);
             if (signalChannel) signalChannel.unsubscribe();
             
             signalChannel = sb.channel(`signal-${code}`, {
                 config: { broadcast: { self: false } }
             })
             .on('broadcast', { event: 'signal' }, async ({ payload }) => {
+                console.log("[Signal] Received message:", payload.type, "from:", payload.from);
                 if (payload.to && payload.to !== localCode) return;
 
                 if (payload.type === 'offer') {
-                    if (peerConnection.signalingState !== "stable") return;
+                    console.log("[WebRTC] Received OFFER. Setting remote description...");
+                    if (peerConnection.signalingState !== "stable") {
+                        console.warn("[WebRTC] Signaling state not stable. Ignoring offer.");
+                        return;
+                    }
                     await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.offer));
                     const answer = await peerConnection.createAnswer();
                     await peerConnection.setLocalDescription(answer);
+                    console.log("[Signal] Sending ANSWER to:", payload.from);
                     signalChannel.send({
                         type: 'broadcast',
                         event: 'signal',
                         payload: { type: 'answer', answer: answer, from: localCode, to: payload.from }
                     });
                 } else if (payload.type === 'answer') {
+                    console.log("[WebRTC] Received ANSWER. Setting remote description...");
                     if (peerConnection.signalingState === "have-local-offer") {
                         await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.answer));
                     }
                 } else if (payload.type === 'ice-candidate') {
+                    console.log("[WebRTC] Received ICE Candidate");
                     try {
                         if (payload.candidate) {
                             await peerConnection.addIceCandidate(new RTCIceCandidate(payload.candidate));
                         }
-                    } catch (e) {}
+                    } catch (e) { console.error("[WebRTC] ICE Error:", e); }
                 }
             })
             .subscribe((status) => {
-                if (status === 'SUBSCRIBED') {
-                    console.log("Active on:", code);
-                }
+                console.log("[Supabase] Subscription status:", status);
             });
         }
 
         function setupWebRTC() {
+            console.log("[WebRTC] Initializing PeerConnection...");
             if (peerConnection) {
-                peerConnection.onicecandidate = null;
-                peerConnection.ondatachannel = null;
-                peerConnection.oniceconnectionstatechange = null;
                 peerConnection.close();
             }
             
@@ -348,6 +355,7 @@
             peerConnection.onicecandidate = (event) => {
                 if (event.candidate && signalChannel) {
                     const targetCode = document.getElementById('peerIdInput').value.trim();
+                    console.log("[WebRTC] Generated local ICE Candidate. Broadcasting...");
                     signalChannel.send({
                         type: 'broadcast',
                         event: 'signal',
@@ -362,15 +370,21 @@
             };
 
             peerConnection.ondatachannel = (event) => {
+                console.log("[WebRTC] Inbound DataChannel detected");
                 dataChannel = event.channel;
                 setupDataChannel(dataChannel);
             };
 
             peerConnection.oniceconnectionstatechange = () => {
+                console.log("[WebRTC] Connection State Change:", peerConnection.iceConnectionState);
                 const state = peerConnection.iceConnectionState;
                 updateUIStatus(state);
-                if (state === 'connected' || state === 'completed') completeHandshakeUI();
+                if (state === 'connected' || state === 'completed') {
+                    console.log("[System] P2P Tunnel Established!");
+                    completeHandshakeUI();
+                }
                 if (state === 'failed') {
+                    console.error("[System] P2P Handshake Failed.");
                     resetSetup();
                 }
             };
@@ -378,22 +392,27 @@
 
         async function connectToPeer() {
             const code = document.getElementById('peerIdInput').value.trim();
+            console.log("[System] Attempting connection to peer:", code);
             if (code.length !== 6) return;
             
             showHandshakeUI();
             setupWebRTC();
             
+            console.log("[WebRTC] Creating local DataChannel...");
             dataChannel = peerConnection.createDataChannel("fileTransfer", { ordered: true });
             setupDataChannel(dataChannel);
 
+            console.log("[WebRTC] Creating Offer...");
             const offer = await peerConnection.createOffer();
             await peerConnection.setLocalDescription(offer);
             
             const sendSignal = () => {
                 if (peerConnection.iceConnectionState === 'connected' || peerConnection.iceConnectionState === 'completed') {
+                    console.log("[Signal] Connection verified. Stopping signal retry.");
                     clearInterval(window.signalRetry);
                     return;
                 }
+                console.log("[Signal] Broadcasting Offer to channel...");
                 signalChannel.send({
                     type: 'broadcast',
                     event: 'signal',
@@ -408,14 +427,19 @@
 
         function setupDataChannel(channel) {
             channel.onopen = () => {
+                console.log("[DataChannel] Channel is now OPEN");
                 if (window.signalRetry) clearInterval(window.signalRetry);
                 completeHandshakeUI();
             };
             channel.onmessage = handleIncomingData;
-            channel.onclose = () => updateUIStatus('disconnected');
+            channel.onclose = () => {
+                console.warn("[DataChannel] Channel CLOSED");
+                updateUIStatus('disconnected');
+            }
         }
 
         function showHandshakeUI() {
+            console.log("[UI] Displaying Handshake Progress Overlay");
             document.getElementById('setupContent').classList.add('hidden');
             document.getElementById('handshakeContent').classList.remove('hidden');
             handshakeProgressValue = 0;
@@ -433,6 +457,7 @@
         }
 
         function completeHandshakeUI() {
+            console.log("[UI] Connection successful. Clearing overlay.");
             if (window.handshakeInterval) clearInterval(window.handshakeInterval);
             document.getElementById('handshakePercent').innerText = `100%`;
             document.getElementById('handshakeProgressBar').style.width = `100%`;
@@ -443,6 +468,7 @@
         }
 
         function resetSetup() {
+            console.log("[System] Resetting setup process...");
             if (window.handshakeInterval) clearInterval(window.handshakeInterval);
             if (window.signalRetry) clearInterval(window.signalRetry);
             document.getElementById('setupScreen').classList.remove('hidden');
@@ -455,10 +481,15 @@
             try {
                 const data = JSON.parse(event.data);
                 if (data.type === 'file-start') {
+                    console.log("[File] Receiving file:", data.name);
                     window.incomingFile = { name: data.name, chunks: [] };
                 } else if (data.type === 'file-chunk') {
                     window.incomingFile.chunks.push(data.chunk);
+                    if (window.incomingFile.chunks.length % 50 === 0) {
+                        console.log("[File] Received chunk", window.incomingFile.chunks.length, "of", data.totalChunks);
+                    }
                     if (window.incomingFile.chunks.length === data.totalChunks) {
+                        console.log("[File] Reassembling file...");
                         const blob = new Blob(window.incomingFile.chunks.map(c => {
                             const bin = atob(c);
                             const arr = new Uint8Array(bin.length);
@@ -470,22 +501,27 @@
                         a.href = url;
                         a.download = window.incomingFile.name;
                         a.click();
+                        console.log("[File] Saved to local storage:", window.incomingFile.name);
                         showToast(`Received: ${window.incomingFile.name}`);
                     }
                 }
-            } catch (e) {}
+            } catch (e) { console.error("[DataChannel] Parse Error:", e); }
         }
 
         function handleFiles(files) {
             const file = files[0];
             const reader = new FileReader();
             const chunkSize = 16384;
+            console.log("[File] Preparing to send:", file.name, "(" + file.size + " bytes)");
             document.getElementById('dropZone').classList.add('hidden');
             document.getElementById('transferProgress').classList.remove('hidden');
+            
             reader.onload = async (e) => {
                 const buffer = e.target.result;
                 const totalChunks = Math.ceil(buffer.byteLength / chunkSize);
+                console.log("[File] Splitting into", totalChunks, "chunks...");
                 dataChannel.send(JSON.stringify({ type: 'file-start', name: file.name }));
+                
                 for (let i = 0; i < totalChunks; i++) {
                     const chunk = buffer.slice(i * chunkSize, (i + 1) * chunkSize);
                     const bytes = new Uint8Array(chunk);
@@ -496,10 +532,14 @@
                         chunk: btoa(binary),
                         totalChunks: totalChunks
                     }));
+                    
                     let p = ((i + 1) / totalChunks) * 100;
                     document.getElementById('progressBar').style.width = `${p}%`;
                     document.getElementById('percentText').innerText = `${Math.round(p)}%`;
+                    
+                    if ((i + 1) % 50 === 0) console.log("[File] Sent chunk", (i + 1));
                 }
+                console.log("[File] All chunks transmitted.");
                 setTimeout(closeModal, 1000);
                 showToast("Transfer Complete!");
             };
@@ -507,6 +547,7 @@
         }
 
         function renderDeviceNode() {
+            console.log("[UI] Rendering active peer node");
             document.getElementById('devices').innerHTML = `
                 <div class="device-node absolute top-[15%] left-[50%] -translate-x-1/2 flex flex-col items-center gap-2 cursor-pointer" onclick="openTransfer()">
                     <div class="w-16 h-16 bg-white rounded-2xl shadow-lg flex items-center justify-center border border-slate-100">
@@ -533,10 +574,15 @@
             }
         }
 
-        function openTransfer() { document.getElementById('transferModal').style.display = 'flex'; }
+        function openTransfer() { 
+            console.log("[UI] Opening file picker modal");
+            document.getElementById('transferModal').style.display = 'flex'; 
+        }
         function closeModal() { document.getElementById('transferModal').style.display = 'none'; }
+        
         function copyDirectLink() {
             const connectUrl = `${APP_URL}?connectcode=${localCode}`;
+            console.log("[UI] Copying link to clipboard:", connectUrl);
             const el = document.createElement('textarea');
             el.value = connectUrl;
             document.body.appendChild(el);
@@ -545,6 +591,7 @@
             document.body.removeChild(el);
             showToast("Link Copied!");
         }
+
         function showToast(msg) {
             const t = document.getElementById('toast');
             document.getElementById('toastMsg').innerText = msg;
@@ -553,11 +600,13 @@
         }
 
         window.onload = () => {
+            console.log("[System] DOM Ready. Ready for action.");
             feather.replace();
             setupWebRTC();
             const params = new URLSearchParams(window.location.search);
             const cc = params.get('connectcode');
             if (cc) {
+                console.log("[System] Connection code detected in URL:", cc);
                 navigateToApp();
                 document.getElementById('peerIdInput').value = cc;
                 setTimeout(connectToPeer, 1500);
