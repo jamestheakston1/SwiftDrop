@@ -12,8 +12,19 @@
             0% { transform: scale(0.33); opacity: 1; }
             80%, 100% { opacity: 0; }
         }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
         .radar-ring {
             animation: pulse-ring 3s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+        }
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid rgba(37, 99, 235, 0.1);
+            border-top-color: #2563eb;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
         }
         .glass {
             background: rgba(255, 255, 255, 0.7);
@@ -86,8 +97,8 @@
                     <div class="w-12 h-12 bg-green-100 text-green-600 rounded-xl flex items-center justify-center mb-6">
                         <i data-feather="maximize"></i>
                     </div>
-                    <h3 class="font-bold text-xl mb-3">QR Handshake</h3>
-                    <p class="text-slate-500">No more manual link sharing. Just scan the code from your other phone to link instantly.</p>
+                    <h3 class="font-bold text-xl mb-3">Instant Link</h3>
+                    <p class="text-slate-500">Generate a unique 6-digit code or connection URL to pair devices instantly without typing long IDs.</p>
                 </div>
                 <div class="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm text-left">
                     <div class="w-12 h-12 bg-amber-100 text-amber-600 rounded-xl flex items-center justify-center mb-6">
@@ -143,34 +154,44 @@
         </nav>
 
         <div id="setupScreen" class="fixed inset-0 z-[60] glass flex items-center justify-center p-6 mt-16 overflow-y-auto">
-            <div class="max-w-md w-full text-center py-10">
+            <div id="setupContent" class="max-w-md w-full text-center py-10 transition-opacity duration-300">
                 <div class="w-20 h-20 bg-blue-600 text-white rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-xl">
                     <i data-feather="wifi" class="w-10 h-10"></i>
                 </div>
                 <h1 class="text-3xl font-bold mb-2">Connect Devices</h1>
-                <p class="text-slate-500 mb-8">Scan the code on your other phone to link them via WebRTC.</p>
+                <p class="text-slate-500 mb-8">Scan the code or share the 6-digit code to link your devices.</p>
                 
                 <div class="space-y-6">
                     <div class="bg-white p-6 rounded-3xl border border-slate-200 flex flex-col items-center">
                         <div id="qrcode" class="mb-4 p-2 bg-white rounded-xl"></div>
-                        <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Or use Manual Code</p>
+                        <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Your Pairing Link</p>
                         <div class="flex gap-2 w-full">
-                            <input id="myIdDisplay" readonly class="flex-1 bg-slate-50 border-none text-xs font-mono p-3 rounded-xl focus:ring-0" value="Generating...">
-                            <button onclick="copyMyId()" class="bg-blue-50 text-blue-600 p-3 rounded-xl hover:bg-blue-100 transition-colors">
-                                <i data-feather="copy" class="w-5 h-5"></i>
+                            <input id="myCodeDisplay" readonly class="flex-1 bg-slate-50 border-none text-xl font-bold tracking-widest text-center p-3 rounded-xl focus:ring-0" value="------">
+                            <button onclick="copyDirectLink()" class="bg-blue-50 text-blue-600 p-3 rounded-xl hover:bg-blue-100 transition-colors">
+                                <i data-feather="share" class="w-5 h-5"></i>
                             </button>
                         </div>
                     </div>
 
                     <div class="bg-white p-6 rounded-3xl border border-slate-200 text-left">
-                        <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Connect to Peer ID</p>
+                        <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Enter 6-Digit Code</p>
                         <div class="flex gap-2">
-                            <input id="peerIdInput" class="flex-1 bg-slate-50 border-none text-sm font-mono p-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Paste ID here...">
+                            <input id="peerIdInput" maxlength="6" class="flex-1 bg-slate-50 border-none text-xl font-bold text-center tracking-widest p-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="000000">
                             <button onclick="connectToPeer()" class="bg-blue-600 text-white px-6 py-3 rounded-xl font-medium hover:bg-blue-700 transition-colors">
                                 Connect
                             </button>
                         </div>
                     </div>
+                </div>
+            </div>
+
+            <div id="handshakeContent" class="hidden max-w-md w-full text-center py-10 transition-opacity duration-300">
+                <div class="spinner mx-auto mb-6"></div>
+                <h2 class="text-2xl font-bold mb-2">Securing Connection...</h2>
+                <p class="text-slate-500 mb-2">Establishing P2P Tunnel</p>
+                <div class="text-3xl font-black text-blue-600" id="handshakePercent">0%</div>
+                <div class="w-full max-w-[200px] bg-slate-100 h-1.5 rounded-full overflow-hidden mx-auto mt-4">
+                    <div id="handshakeProgressBar" class="bg-blue-600 h-full w-0 transition-all duration-300"></div>
                 </div>
             </div>
         </div>
@@ -237,8 +258,7 @@
         let peerConnection;
         let dataChannel;
         let qrCode;
-        let landingQR;
-        let localId = Math.random().toString(36).substring(2, 8).toUpperCase();
+        let localCode = Math.floor(100000 + Math.random() * 900000).toString();
         const iceServers = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
         const APP_URL = "https://swift-drop.pages.dev";
 
@@ -247,7 +267,9 @@
             document.getElementById('app-view').style.display = 'block';
             window.scrollTo(0,0);
             if (!qrCode) {
-                generateQRCode(localId);
+                const connectUrl = `${APP_URL}?connectcode=${localCode}`;
+                generateQRCode(connectUrl);
+                document.getElementById('myCodeDisplay').value = localCode;
             }
         }
 
@@ -271,7 +293,6 @@
 
         function init() {
             feather.replace();
-            document.getElementById('myIdDisplay').value = localId;
             
             const landingContainer = document.getElementById('landing-qr');
             new QRCode(landingContainer, {
@@ -284,44 +305,86 @@
             });
 
             setupWebRTC();
+            checkAutoConnect();
+        }
+
+        function checkAutoConnect() {
+            const params = new URLSearchParams(window.location.search);
+            const connectCode = params.get('connectcode');
+            if (connectCode && connectCode.length === 6) {
+                navigateToApp();
+                document.getElementById('peerIdInput').value = connectCode;
+                setTimeout(connectToPeer, 500);
+            }
         }
 
         function setupWebRTC() {
             peerConnection = new RTCPeerConnection(iceServers);
-            peerConnection.onicecandidate = (event) => {
-                if (event.candidate) {
-                    const signal = btoa(JSON.stringify(peerConnection.localDescription));
-                    document.getElementById('myIdDisplay').value = signal;
-                    generateQRCode(signal);
-                }
-            };
             peerConnection.ondatachannel = (event) => {
                 receiveChannelCallback(event.channel);
             };
             peerConnection.onconnectionstatechange = () => {
-                updateUIStatus(peerConnection.connectionState);
+                const state = peerConnection.connectionState;
+                updateUIStatus(state);
+                if (state === 'failed' || state === 'closed') {
+                    resetHandshakeUI();
+                }
             };
         }
 
         async function connectToPeer() {
-            const remoteSignal = document.getElementById('peerIdInput').value.trim();
-            if (!remoteSignal) return;
-            try {
-                const desc = new RTCSessionDescription(JSON.parse(atob(remoteSignal)));
-                if (desc.type === 'offer') {
-                    await peerConnection.setRemoteDescription(desc);
-                    const answer = await peerConnection.createAnswer();
-                    await peerConnection.setLocalDescription(answer);
-                    const signal = btoa(JSON.stringify(peerConnection.localDescription));
-                    document.getElementById('myIdDisplay').value = signal;
-                    generateQRCode(signal);
-                    showToast("Answer generated! Share the code back.");
-                } else if (desc.type === 'answer') {
-                    await peerConnection.setRemoteDescription(desc);
-                }
-            } catch (e) {
-                showToast("Connection failed. Check code format.");
+            const code = document.getElementById('peerIdInput').value.trim();
+            if (code.length !== 6) {
+                showToast("Please enter a 6-digit code");
+                return;
             }
+            
+            showHandshakeUI();
+            createOffer();
+        }
+
+        function showHandshakeUI() {
+            document.getElementById('setupContent').classList.add('hidden');
+            document.getElementById('handshakeContent').classList.remove('hidden');
+            
+            let percent = 0;
+            const bar = document.getElementById('handshakeProgressBar');
+            const text = document.getElementById('handshakePercent');
+            
+            const interval = setInterval(() => {
+                if (percent < 90) {
+                    percent += Math.random() * 5;
+                    if (percent > 90) percent = 90;
+                    const val = Math.round(percent);
+                    text.innerText = `${val}%`;
+                    bar.style.width = `${val}%`;
+                } else {
+                    clearInterval(interval);
+                }
+            }, 200);
+            
+            window.handshakeInterval = interval;
+        }
+
+        function resetHandshakeUI() {
+            if (window.handshakeInterval) clearInterval(window.handshakeInterval);
+            document.getElementById('setupContent').classList.remove('hidden');
+            document.getElementById('handshakeContent').classList.add('hidden');
+            document.getElementById('handshakeProgressBar').style.width = '0%';
+            document.getElementById('handshakePercent').innerText = '0%';
+        }
+
+        function completeHandshakeUI() {
+            if (window.handshakeInterval) clearInterval(window.handshakeInterval);
+            const bar = document.getElementById('handshakeProgressBar');
+            const text = document.getElementById('handshakePercent');
+            text.innerText = `100%`;
+            bar.style.width = `100%`;
+            
+            setTimeout(() => {
+                document.getElementById('setupScreen').classList.add('hidden');
+                renderDeviceNode();
+            }, 500);
         }
 
         function createOffer() {
@@ -330,17 +393,14 @@
             peerConnection.createOffer().then(offer => {
                 return peerConnection.setLocalDescription(offer);
             }).then(() => {
-                const signal = btoa(JSON.stringify(peerConnection.localDescription));
-                document.getElementById('myIdDisplay').value = signal;
-                generateQRCode(signal);
+                updateUIStatus('negotiating');
             });
         }
 
         function setupDataChannel(channel) {
             channel.onopen = () => {
-                document.getElementById('setupScreen').classList.add('hidden');
+                completeHandshakeUI();
                 updateUIStatus('connected');
-                renderDeviceNode();
             };
             channel.onmessage = handleIncomingData;
         }
@@ -391,6 +451,8 @@
             if (state === 'connected') {
                 status.innerHTML = `<span class="w-2 h-2 bg-green-500 rounded-full"></span> Connected`;
                 status.classList.replace('text-slate-500', 'text-green-600');
+            } else if (state === 'negotiating') {
+                status.innerHTML = `<span class="w-2 h-2 bg-amber-500 rounded-full"></span> Handshaking...`;
             } else {
                 status.innerHTML = `<span class="w-2 h-2 bg-slate-400 rounded-full"></span> ${state}`;
             }
@@ -436,14 +498,15 @@
             document.getElementById('transferProgress').classList.add('hidden');
         }
 
-        function copyMyId() {
-            const input = document.getElementById('myIdDisplay');
-            input.select();
+        function copyDirectLink() {
+            const connectUrl = `${APP_URL}?connectcode=${localCode}`;
+            const tempInput = document.createElement('input');
+            document.body.appendChild(tempInput);
+            tempInput.value = connectUrl;
+            tempInput.select();
             document.execCommand('copy');
-            showToast("Signal ID copied!");
-            if (peerConnection.localDescription === null) {
-                createOffer();
-            }
+            document.body.removeChild(tempInput);
+            showToast("Connection link copied!");
         }
 
         function showToast(msg) {
