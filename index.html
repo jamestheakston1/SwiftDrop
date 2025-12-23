@@ -7,6 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/feather-icons"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         @keyframes pulse-ring {
             0% { transform: scale(0.33); opacity: 1; }
@@ -125,35 +126,7 @@
                     <p class="text-slate-500">Uses your local Wi-Fi bandwidth for the fastest possible transfer speeds between devices.</p>
                 </div>
             </div>
-
-            <div class="bg-slate-900 rounded-[3rem] p-8 md:p-16 text-white w-full flex flex-col md:flex-row items-center gap-12 text-left">
-                <div class="flex-1">
-                    <h2 class="text-3xl md:text-5xl font-bold mb-6">Built for the iPhone to Android switch.</h2>
-                    <p class="text-slate-400 text-lg mb-8 leading-relaxed">
-                        Moving files between ecosystems shouldn't be hard. SwiftDrop creates a secure P2P tunnel between any two browsers, allowing for bulk transfers of 4K video, RAW photos, and massive documents in seconds.
-                    </p>
-                    <div class="flex gap-4">
-                        <div class="flex items-center gap-2 text-sm font-medium"><i data-feather="check" class="text-blue-400"></i> No Data usage</div>
-                        <div class="flex items-center gap-2 text-sm font-medium"><i data-feather="check" class="text-blue-400"></i> No account</div>
-                    </div>
-                </div>
-                <div class="w-full md:w-1/3 flex justify-center">
-                    <div class="bg-white/10 p-6 rounded-3xl backdrop-blur-md border border-white/20 text-center">
-                        <div class="qr-wrapper mb-4">
-                            <div id="landing-qr" class="bg-white p-2 rounded-xl"></div>
-                            <div class="qr-icon shadow-none">
-                                <i data-feather="share-2" class="w-6 h-6 text-blue-600"></i>
-                            </div>
-                        </div>
-                        <p class="text-xs font-bold text-slate-400 uppercase tracking-tighter">Scan to open on your phone</p>
-                    </div>
-                </div>
-            </div>
         </section>
-
-        <footer class="py-12 px-6 border-t border-slate-200 text-center text-slate-500 text-sm">
-            &copy; 2025 SwiftDrop (swift-drop.pages.dev). Private. Secure. Peer-to-Peer.
-        </footer>
     </div>
 
     <div id="app-view">
@@ -204,7 +177,7 @@
                         <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Enter 6-Digit Code</p>
                         <div class="flex gap-2">
                             <input id="peerIdInput" maxlength="6" class="flex-1 bg-slate-50 border-none text-xl font-bold text-center tracking-widest p-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="000000">
-                            <button onclick="connectToPeer()" class="bg-blue-600 text-white px-6 py-3 rounded-xl font-medium hover:bg-blue-700 transition-colors">
+                            <button id="connectBtn" onclick="connectToPeer()" class="bg-blue-600 text-white px-6 py-3 rounded-xl font-medium hover:bg-blue-700 transition-colors">
                                 Connect
                             </button>
                         </div>
@@ -215,7 +188,7 @@
             <div id="handshakeContent" class="hidden max-w-md w-full text-center py-10 transition-opacity duration-300">
                 <div class="spinner mx-auto mb-6"></div>
                 <h2 class="text-2xl font-bold mb-2">Securing Connection...</h2>
-                <p class="text-slate-500 mb-2">This could take up to 2 minutes.</p>
+                <p class="text-slate-500 mb-2">Establishing P2P Tunnel via Supabase</p>
                 <div class="text-3xl font-black text-blue-600" id="handshakePercent">0%</div>
                 <div class="w-full max-w-[200px] bg-slate-100 h-1.5 rounded-full overflow-hidden mx-auto mt-4">
                     <div id="handshakeProgressBar" class="bg-blue-600 h-full w-0 transition-all duration-300"></div>
@@ -237,7 +210,6 @@
                     <h2 class="text-xl font-semibold">Drop Hub</h2>
                     <p class="text-slate-500 text-sm" id="peerName">Waiting for connection...</p>
                 </div>
-
                 <div id="devices" class="absolute inset-0"></div>
             </div>
         </main>
@@ -254,23 +226,20 @@
                     <i data-feather="x" class="w-5 h-5"></i>
                 </button>
             </div>
-
             <div id="dropZone" class="border-2 border-dashed border-slate-200 rounded-2xl p-10 text-center hover:border-blue-400 hover:bg-blue-50/50 transition-all cursor-pointer group mb-6">
                 <input type="file" id="fileInput" class="hidden" onchange="handleFiles(this.files)">
                 <div class="w-16 h-16 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform">
                     <i data-feather="upload-cloud" class="w-8 h-8"></i>
                 </div>
                 <p class="font-medium">Drop files here</p>
-                <p class="text-xs text-slate-400 mt-2">Maximum speed via direct link</p>
             </div>
-
             <div id="transferProgress" class="hidden">
                 <div class="flex justify-between text-sm mb-2 font-medium">
                     <span id="progressText" class="text-blue-600">Sending...</span>
                     <span id="percentText">0%</span>
                 </div>
                 <div class="w-full bg-slate-100 h-3 rounded-full overflow-hidden">
-                    <div id="progressBar" class="bg-blue-600 h-full w-0 transition-all duration-300 shadow-[0_0_10px_rgba(37,99,235,0.4)]"></div>
+                    <div id="progressBar" class="bg-blue-600 h-full w-0 transition-all duration-300"></div>
                 </div>
             </div>
         </div>
@@ -282,22 +251,27 @@
     </div>
 
     <script>
+        const SUPABASE_URL = "https://txvnfnjmgqypsivcwfos.supabase.co";
+        const SUPABASE_KEY = "sb_publishable_E7bYIhykblJCsyzbalF1-g_-07QbZSj";
+        const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
         let peerConnection;
         let dataChannel;
         let qrCode;
         let localCode = Math.floor(100000 + Math.random() * 900000).toString();
         let handshakeProgressValue = 0;
+        let signalChannel;
         const iceServers = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
-        const APP_URL = "https://swift-drop.pages.dev";
+        const APP_URL = window.location.origin;
 
         function navigateToApp() {
             document.getElementById('landing-view').style.display = 'none';
             document.getElementById('app-view').style.display = 'block';
-            window.scrollTo(0,0);
             if (!qrCode) {
                 const connectUrl = `${APP_URL}?connectcode=${localCode}`;
                 generateQRCode(connectUrl);
                 document.getElementById('myCodeDisplay').value = localCode;
+                setupSignalChannel(localCode);
             }
         }
 
@@ -319,58 +293,96 @@
             });
         }
 
-        function init() {
-            feather.replace();
-            const landingContainer = document.getElementById('landing-qr');
-            new QRCode(landingContainer, {
-                text: APP_URL,
-                width: 160,
-                height: 160,
-                colorDark : "#0f172a",
-                colorLight : "#ffffff",
-                correctLevel : QRCode.CorrectLevel.H
-            });
-            setupWebRTC();
-            checkAutoConnect();
-        }
+        function setupSignalChannel(code) {
+            if (signalChannel) signalChannel.unsubscribe();
+            
+            signalChannel = sb.channel(`signal-${code}`, {
+                config: { broadcast: { self: false } }
+            })
+            .on('broadcast', { event: 'signal' }, async ({ payload }) => {
+                if (payload.to && payload.to !== localCode) return;
 
-        function checkAutoConnect() {
-            const params = new URLSearchParams(window.location.search);
-            const connectCode = params.get('connectcode');
-            if (connectCode && connectCode.length === 6) {
-                navigateToApp();
-                document.getElementById('peerIdInput').value = connectCode;
-                setTimeout(connectToPeer, 500);
-            }
+                if (payload.type === 'offer') {
+                    await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.offer));
+                    const answer = await peerConnection.createAnswer();
+                    await peerConnection.setLocalDescription(answer);
+                    signalChannel.send({
+                        type: 'broadcast',
+                        event: 'signal',
+                        payload: { type: 'answer', answer: answer, from: localCode, to: payload.from }
+                    });
+                } else if (payload.type === 'answer') {
+                    await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.answer));
+                } else if (payload.type === 'ice-candidate') {
+                    try {
+                        await peerConnection.addIceCandidate(new RTCIceCandidate(payload.candidate));
+                    } catch (e) {}
+                }
+            })
+            .subscribe((status) => {
+                if (status === 'SUBSCRIBED') {
+                    console.log("Ready for signals on code:", code);
+                }
+            });
         }
 
         function setupWebRTC() {
             peerConnection = new RTCPeerConnection(iceServers);
-            peerConnection.ondatachannel = (event) => {
-                receiveChannelCallback(event.channel);
+            
+            peerConnection.onicecandidate = (event) => {
+                if (event.candidate && signalChannel) {
+                    const targetCode = document.getElementById('peerIdInput').value.trim();
+                    signalChannel.send({
+                        type: 'broadcast',
+                        event: 'signal',
+                        payload: { 
+                            type: 'ice-candidate', 
+                            candidate: event.candidate, 
+                            from: localCode,
+                            to: targetCode || null
+                        }
+                    });
+                }
             };
+
+            peerConnection.ondatachannel = (event) => {
+                dataChannel = event.channel;
+                setupDataChannel(dataChannel);
+            };
+
             peerConnection.oniceconnectionstatechange = () => {
                 const state = peerConnection.iceConnectionState;
                 updateUIStatus(state);
-                if (state === 'connected' || state === 'completed') {
-                    completeHandshakeUI();
-                }
-            };
-            peerConnection.onconnectionstatechange = () => {
-                const state = peerConnection.connectionState;
-                if (state === 'connected') completeHandshakeUI();
-                if (state === 'failed' || state === 'closed') resetHandshakeUI();
+                if (state === 'connected' || state === 'completed') completeHandshakeUI();
             };
         }
 
         async function connectToPeer() {
             const code = document.getElementById('peerIdInput').value.trim();
             if (code.length !== 6) {
-                showToast("Please enter a 6-digit code");
+                showToast("Enter a valid code");
                 return;
             }
+            
             showHandshakeUI();
-            createOffer();
+            
+            dataChannel = peerConnection.createDataChannel("fileTransfer");
+            setupDataChannel(dataChannel);
+
+            const offer = await peerConnection.createOffer();
+            await peerConnection.setLocalDescription(offer);
+            
+            signalChannel.send({
+                type: 'broadcast',
+                event: 'signal',
+                payload: { type: 'offer', offer: offer, from: localCode, to: code }
+            });
+        }
+
+        function setupDataChannel(channel) {
+            channel.onopen = () => completeHandshakeUI();
+            channel.onmessage = handleIncomingData;
+            channel.onclose = () => updateUIStatus('disconnected');
         }
 
         function showHandshakeUI() {
@@ -381,175 +393,129 @@
             const text = document.getElementById('handshakePercent');
             
             const interval = setInterval(() => {
-                if (handshakeProgressValue < 90) {
-                    handshakeProgressValue += Math.random() * 5;
-                    if (handshakeProgressValue > 90) handshakeProgressValue = 90;
-                    const val = Math.round(handshakeProgressValue);
-                    text.innerText = `${val}%`;
-                    bar.style.width = `${val}%`;
+                if (handshakeProgressValue < 98) {
+                    handshakeProgressValue += 2;
+                    text.innerText = `${handshakeProgressValue}%`;
+                    bar.style.width = `${handshakeProgressValue}%`;
                 }
-            }, 200);
+            }, 100);
             window.handshakeInterval = interval;
-        }
-
-        function resetHandshakeUI() {
-            if (window.handshakeInterval) clearInterval(window.handshakeInterval);
-            document.getElementById('setupContent').classList.remove('hidden');
-            document.getElementById('handshakeContent').classList.add('hidden');
-            document.getElementById('handshakeProgressBar').style.width = '0%';
-            document.getElementById('handshakePercent').innerText = '0%';
         }
 
         function completeHandshakeUI() {
             if (window.handshakeInterval) clearInterval(window.handshakeInterval);
-            handshakeProgressValue = 100;
-            const bar = document.getElementById('handshakeProgressBar');
-            const text = document.getElementById('handshakePercent');
-            text.innerText = `100%`;
-            bar.style.width = `100%`;
-            
+            document.getElementById('handshakePercent').innerText = `100%`;
+            document.getElementById('handshakeProgressBar').style.width = `100%`;
             setTimeout(() => {
                 document.getElementById('setupScreen').classList.add('hidden');
                 renderDeviceNode();
-                updateUIStatus('connected');
-            }, 600);
-        }
-
-        function createOffer() {
-            dataChannel = peerConnection.createDataChannel("fileTransfer");
-            setupDataChannel(dataChannel);
-            peerConnection.createOffer()
-                .then(offer => peerConnection.setLocalDescription(offer))
-                .then(() => updateUIStatus('negotiating'))
-                .catch(e => {
-                    resetHandshakeUI();
-                    showToast("Handshake failed. Try again.");
-                });
-        }
-
-        function setupDataChannel(channel) {
-            channel.onopen = () => {
-                completeHandshakeUI();
-            };
-            channel.onmessage = handleIncomingData;
-            channel.onclose = () => updateUIStatus('disconnected');
-        }
-
-        function receiveChannelCallback(channel) {
-            dataChannel = channel;
-            setupDataChannel(dataChannel);
+            }, 500);
         }
 
         function handleIncomingData(event) {
-            const data = JSON.parse(event.data);
-            if (data.type === 'file-start') {
-                window.incomingFile = { name: data.name, size: data.size, chunks: [] };
-            } else if (data.type === 'file-chunk') {
-                window.incomingFile.chunks.push(data.chunk);
-                if (window.incomingFile.chunks.length === data.totalChunks) {
-                    finalizeDownload();
+            try {
+                const data = JSON.parse(event.data);
+                if (data.type === 'file-start') {
+                    window.incomingFile = { name: data.name, chunks: [] };
+                } else if (data.type === 'file-chunk') {
+                    window.incomingFile.chunks.push(data.chunk);
+                    if (window.incomingFile.chunks.length === data.totalChunks) {
+                        const blob = new Blob(window.incomingFile.chunks.map(c => Uint8Array.from(atob(c), c => c.charCodeAt(0))));
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = window.incomingFile.name;
+                        a.click();
+                        showToast(`Received: ${window.incomingFile.name}`);
+                    }
                 }
-            }
-        }
-
-        function finalizeDownload() {
-            const blob = new Blob(window.incomingFile.chunks.map(c => Uint8Array.from(atob(c), c => c.charCodeAt(0))));
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = window.incomingFile.name;
-            a.click();
-            showToast(`Received: ${window.incomingFile.name}`);
-        }
-
-        function renderDeviceNode() {
-            const container = document.getElementById('devices');
-            container.innerHTML = `
-                <div class="device-node absolute top-[15%] left-[50%] -translate-x-1/2 flex flex-col items-center gap-2 cursor-pointer" onclick="openTransfer()">
-                    <div class="w-16 h-16 bg-white rounded-2xl shadow-lg flex items-center justify-center border border-slate-100">
-                        <i data-feather="smartphone" class="w-7 h-7 text-blue-600"></i>
-                    </div>
-                    <span class="text-xs font-bold bg-white px-2 py-1 rounded-full shadow-sm border border-slate-50">Cross-Platform Linked</span>
-                </div>
-            `;
-            feather.replace();
-            document.getElementById('peerName').innerText = "Direct P2P Link Active";
-        }
-
-        function updateUIStatus(state) {
-            const statusDot = document.getElementById('statusDot');
-            const statusText = document.getElementById('statusText');
-            if (state === 'connected' || state === 'completed') {
-                statusDot.className = "w-2 h-2 bg-green-500 rounded-full";
-                statusText.innerText = "Connected";
-            } else if (state === 'negotiating' || state === 'checking') {
-                statusDot.className = "w-2 h-2 bg-amber-500 rounded-full";
-                statusText.innerText = "Connecting...";
-            } else {
-                statusDot.className = "w-2 h-2 bg-slate-400 rounded-full";
-                statusText.innerText = "Disconnected";
-            }
+            } catch (e) {}
         }
 
         function handleFiles(files) {
-            if (!files.length || !dataChannel || dataChannel.readyState !== 'open') return;
             const file = files[0];
             const reader = new FileReader();
-            const chunkSize = 16384; 
+            const chunkSize = 16384;
             document.getElementById('dropZone').classList.add('hidden');
             document.getElementById('transferProgress').classList.remove('hidden');
             reader.onload = async (e) => {
                 const buffer = e.target.result;
                 const totalChunks = Math.ceil(buffer.byteLength / chunkSize);
-                dataChannel.send(JSON.stringify({ type: 'file-start', name: file.name, size: file.size }));
+                dataChannel.send(JSON.stringify({ type: 'file-start', name: file.name }));
                 for (let i = 0; i < totalChunks; i++) {
-                    const start = i * chunkSize;
-                    const end = Math.min(start + chunkSize, buffer.byteLength);
-                    const chunk = buffer.slice(start, end);
+                    const chunk = buffer.slice(i * chunkSize, (i + 1) * chunkSize);
                     dataChannel.send(JSON.stringify({
                         type: 'file-chunk',
                         chunk: btoa(String.fromCharCode(...new Uint8Array(chunk))),
                         totalChunks: totalChunks
                     }));
-                    let progress = ((i + 1) / totalChunks) * 100;
-                    document.getElementById('progressBar').style.width = `${progress}%`;
-                    document.getElementById('percentText').innerText = `${Math.round(progress)}%`;
+                    let p = ((i + 1) / totalChunks) * 100;
+                    document.getElementById('progressBar').style.width = `${p}%`;
+                    document.getElementById('percentText').innerText = `${Math.round(p)}%`;
                 }
-                showToast("Sent successfully!");
                 setTimeout(closeModal, 1000);
+                showToast("Transfer Complete!");
             };
             reader.readAsArrayBuffer(file);
         }
 
-        function openTransfer() {
-            document.getElementById('transferModal').style.display = 'flex';
+        function renderDeviceNode() {
+            document.getElementById('devices').innerHTML = `
+                <div class="device-node absolute top-[15%] left-[50%] -translate-x-1/2 flex flex-col items-center gap-2 cursor-pointer" onclick="openTransfer()">
+                    <div class="w-16 h-16 bg-white rounded-2xl shadow-lg flex items-center justify-center border border-slate-100">
+                        <i data-feather="smartphone" class="w-7 h-7 text-blue-600"></i>
+                    </div>
+                    <span class="text-xs font-bold bg-white px-2 py-1 rounded-full shadow-sm border border-slate-50">Peer Linked</span>
+                </div>
+            `;
+            feather.replace();
         }
 
-        function closeModal() {
-            document.getElementById('transferModal').style.display = 'none';
-            document.getElementById('dropZone').classList.remove('hidden');
-            document.getElementById('transferProgress').classList.add('hidden');
+        function updateUIStatus(state) {
+            const dot = document.getElementById('statusDot');
+            const text = document.getElementById('statusText');
+            if (state === 'connected') {
+                dot.className = "w-2 h-2 bg-green-500 rounded-full";
+                text.innerText = "Connected";
+            } else if (state === 'failed' || state === 'disconnected') {
+                dot.className = "w-2 h-2 bg-red-500 rounded-full";
+                text.innerText = "Disconnected";
+            } else {
+                dot.className = "w-2 h-2 bg-amber-500 rounded-full";
+                text.innerText = "Connecting...";
+            }
         }
 
+        function openTransfer() { document.getElementById('transferModal').style.display = 'flex'; }
+        function closeModal() { document.getElementById('transferModal').style.display = 'none'; }
         function copyDirectLink() {
             const connectUrl = `${APP_URL}?connectcode=${localCode}`;
-            const tempInput = document.createElement('input');
-            document.body.appendChild(tempInput);
-            tempInput.value = connectUrl;
-            tempInput.select();
+            const el = document.createElement('textarea');
+            el.value = connectUrl;
+            document.body.appendChild(el);
+            el.select();
             document.execCommand('copy');
-            document.body.removeChild(tempInput);
-            showToast("Connection link copied!");
+            document.body.removeChild(el);
+            showToast("Link Copied!");
         }
-
         function showToast(msg) {
-            const toast = document.getElementById('toast');
+            const t = document.getElementById('toast');
             document.getElementById('toastMsg').innerText = msg;
-            toast.style.transform = 'translate(-50%, -40px)';
-            setTimeout(() => toast.style.transform = 'translate(-50%, 128px)', 3000);
+            t.style.transform = 'translate(-50%, -40px)';
+            setTimeout(() => t.style.transform = 'translate(-50%, 128px)', 3000);
         }
 
-        window.onload = init;
+        window.onload = () => {
+            feather.replace();
+            setupWebRTC();
+            const params = new URLSearchParams(window.location.search);
+            const cc = params.get('connectcode');
+            if (cc) {
+                navigateToApp();
+                document.getElementById('peerIdInput').value = cc;
+                setTimeout(connectToPeer, 1500);
+            }
+        };
     </script>
 </body>
 </html>
