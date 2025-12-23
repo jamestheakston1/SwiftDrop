@@ -169,8 +169,8 @@
             </div>
             <div class="flex items-center gap-4">
                 <div id="connStatus" class="flex items-center gap-2 bg-slate-100 text-slate-500 px-4 py-2 rounded-full text-sm font-medium border border-slate-200">
-                    <span class="w-2 h-2 bg-slate-400 rounded-full"></span>
-                    Disconnected
+                    <span id="statusDot" class="w-2 h-2 bg-slate-400 rounded-full"></span>
+                    <span id="statusText">Disconnected</span>
                 </div>
             </div>
         </nav>
@@ -215,7 +215,7 @@
             <div id="handshakeContent" class="hidden max-w-md w-full text-center py-10 transition-opacity duration-300">
                 <div class="spinner mx-auto mb-6"></div>
                 <h2 class="text-2xl font-bold mb-2">Securing Connection...</h2>
-                <p class="text-slate-500 mb-2">Establishing P2P Tunnel</p>
+                <p class="text-slate-500 mb-2">This could take up to 2 minutes.</p>
                 <div class="text-3xl font-black text-blue-600" id="handshakePercent">0%</div>
                 <div class="w-full max-w-[200px] bg-slate-100 h-1.5 rounded-full overflow-hidden mx-auto mt-4">
                     <div id="handshakeProgressBar" class="bg-blue-600 h-full w-0 transition-all duration-300"></div>
@@ -286,6 +286,7 @@
         let dataChannel;
         let qrCode;
         let localCode = Math.floor(100000 + Math.random() * 900000).toString();
+        let handshakeProgressValue = 0;
         const iceServers = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
         const APP_URL = "https://swift-drop.pages.dev";
 
@@ -320,7 +321,6 @@
 
         function init() {
             feather.replace();
-            
             const landingContainer = document.getElementById('landing-qr');
             new QRCode(landingContainer, {
                 text: APP_URL,
@@ -330,7 +330,6 @@
                 colorLight : "#ffffff",
                 correctLevel : QRCode.CorrectLevel.H
             });
-
             setupWebRTC();
             checkAutoConnect();
         }
@@ -350,14 +349,17 @@
             peerConnection.ondatachannel = (event) => {
                 receiveChannelCallback(event.channel);
             };
+            peerConnection.oniceconnectionstatechange = () => {
+                const state = peerConnection.iceConnectionState;
+                updateUIStatus(state);
+                if (state === 'connected' || state === 'completed') {
+                    completeHandshakeUI();
+                }
+            };
             peerConnection.onconnectionstatechange = () => {
                 const state = peerConnection.connectionState;
-                updateUIStatus(state);
-                if (state === 'connected') {
-                    completeHandshakeUI();
-                } else if (state === 'failed' || state === 'closed') {
-                    resetHandshakeUI();
-                }
+                if (state === 'connected') completeHandshakeUI();
+                if (state === 'failed' || state === 'closed') resetHandshakeUI();
             };
         }
 
@@ -367,7 +369,6 @@
                 showToast("Please enter a 6-digit code");
                 return;
             }
-            
             showHandshakeUI();
             createOffer();
         }
@@ -375,21 +376,19 @@
         function showHandshakeUI() {
             document.getElementById('setupContent').classList.add('hidden');
             document.getElementById('handshakeContent').classList.remove('hidden');
-            
-            let percent = 0;
+            handshakeProgressValue = 0;
             const bar = document.getElementById('handshakeProgressBar');
             const text = document.getElementById('handshakePercent');
             
             const interval = setInterval(() => {
-                if (percent < 90) {
-                    percent += Math.random() * 8;
-                    if (percent > 90) percent = 90;
-                    const val = Math.round(percent);
+                if (handshakeProgressValue < 90) {
+                    handshakeProgressValue += Math.random() * 5;
+                    if (handshakeProgressValue > 90) handshakeProgressValue = 90;
+                    const val = Math.round(handshakeProgressValue);
                     text.innerText = `${val}%`;
                     bar.style.width = `${val}%`;
                 }
-            }, 150);
-            
+            }, 200);
             window.handshakeInterval = interval;
         }
 
@@ -403,6 +402,7 @@
 
         function completeHandshakeUI() {
             if (window.handshakeInterval) clearInterval(window.handshakeInterval);
+            handshakeProgressValue = 100;
             const bar = document.getElementById('handshakeProgressBar');
             const text = document.getElementById('handshakePercent');
             text.innerText = `100%`;
@@ -411,28 +411,28 @@
             setTimeout(() => {
                 document.getElementById('setupScreen').classList.add('hidden');
                 renderDeviceNode();
+                updateUIStatus('connected');
             }, 600);
         }
 
         function createOffer() {
             dataChannel = peerConnection.createDataChannel("fileTransfer");
             setupDataChannel(dataChannel);
-            peerConnection.createOffer().then(offer => {
-                return peerConnection.setLocalDescription(offer);
-            }).then(() => {
-                updateUIStatus('negotiating');
-            }).catch(e => {
-                resetHandshakeUI();
-                showToast("Handshake failed. Try again.");
-            });
+            peerConnection.createOffer()
+                .then(offer => peerConnection.setLocalDescription(offer))
+                .then(() => updateUIStatus('negotiating'))
+                .catch(e => {
+                    resetHandshakeUI();
+                    showToast("Handshake failed. Try again.");
+                });
         }
 
         function setupDataChannel(channel) {
             channel.onopen = () => {
                 completeHandshakeUI();
-                updateUIStatus('connected');
             };
             channel.onmessage = handleIncomingData;
+            channel.onclose = () => updateUIStatus('disconnected');
         }
 
         function receiveChannelCallback(channel) {
@@ -477,14 +477,17 @@
         }
 
         function updateUIStatus(state) {
-            const status = document.getElementById('connStatus');
-            if (state === 'connected') {
-                status.innerHTML = `<span class="w-2 h-2 bg-green-500 rounded-full"></span> Connected`;
-                status.classList.replace('text-slate-500', 'text-green-600');
-            } else if (state === 'negotiating') {
-                status.innerHTML = `<span class="w-2 h-2 bg-amber-500 rounded-full"></span> Handshaking...`;
+            const statusDot = document.getElementById('statusDot');
+            const statusText = document.getElementById('statusText');
+            if (state === 'connected' || state === 'completed') {
+                statusDot.className = "w-2 h-2 bg-green-500 rounded-full";
+                statusText.innerText = "Connected";
+            } else if (state === 'negotiating' || state === 'checking') {
+                statusDot.className = "w-2 h-2 bg-amber-500 rounded-full";
+                statusText.innerText = "Connecting...";
             } else {
-                status.innerHTML = `<span class="w-2 h-2 bg-slate-400 rounded-full"></span> ${state}`;
+                statusDot.className = "w-2 h-2 bg-slate-400 rounded-full";
+                statusText.innerText = "Disconnected";
             }
         }
 
